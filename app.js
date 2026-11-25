@@ -7,6 +7,7 @@ const $=s=>document.querySelector(s), app=$('#app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const INTS=['Coding','Data Science','Machine Learning','Maths','Statistics','Gaming','Anime','Movies','Music','Cricket','Football','Gym','Reading','Travel','Cooking','Photography','Startups','Finance','Chess','Art','Memes','Night owl study','Morning study'];
 const LV=['Foundation','Diploma','BSc Degree','BS Degree'], LOOK=['Dating','Study partner','Both'];
+let prevTab='discover';
 let me,isAdmin=false,isSuper=false,tab='discover',deck=[],last=null,n=0,showAd=false,chat=null,F={looking:'All',level:'All'};
 const prem=p=>p&&p.plan==='premium'&&p.paid_until&&new Date(p.paid_until)>new Date();
 const imgOf=p=>p.photo?`<img src="${esc(p.photo)}" alt="">`:`<div class="ph">🙂</div>`;
@@ -64,15 +65,16 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
   let photo=p.photo||null,f=$('#ph').files[0];
   if(f){const path=`${user.id}/${Date.now()}.jpg`;const r=await sb.storage.from('photos').upload(path,f);if(r.error)return toast(r.error.message);photo=sb.storage.from('photos').getPublicUrl(path).data.publicUrl}
   const row={id:user.id,name:$('#nm').value,age,cohort:$('#co').value,level:$('#lv').value,looking:$('#lk').value,bio:$('#bio').value,interests:[...sel],photo};
-  const{error}=await sb.from('profiles').upsert(row);if(error)return toast(error.message);boot(user)};
- if(edit){$('#bk').onclick=()=>shell();$('#ctc').onclick=()=>contact();$('#lo').onclick=()=>sb.auth.signOut();
+  const{error}=await sb.from('profiles').upsert(row);if(error)return toast(error.message);
+  if(edit){tab=prevTab;deck=[];last=null;toast('Profile saved ✓')}boot(user)};
+ if(edit){$('#bk').onclick=()=>{tab=prevTab;shell()};$('#ctc').onclick=()=>contact();$('#lo').onclick=()=>sb.auth.signOut();
   $('#hd').onclick=async()=>{await sb.from('profiles').update({hidden:!p.hidden}).eq('id',p.id);boot(user)};
   $('#dl').onclick=async()=>{if(confirm('Delete your profile? Your profile, matches and chats disappear for everyone. You can create a new profile later with the same email.')){await sb.rpc('delete_my_account');sb.auth.signOut()}}}}
 
 // ---- SHELL ----
 function shell(){app.innerHTML=`<div class="wrap" id="v"></div>
  <nav>${[['discover','🔥','Discover'],['likes','💛','Likes'],['chats','💬','Chats'],['premium','⭐','Premium'],['me','👤','Me']].map(([k,i,l])=>`<button data-t="${k}"><b>${i}</b>${l}</button>`).join('')}</nav>`;
- document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;chat=null;go()});
+ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(b.dataset.t==='me'&&tab!=='me')prevTab=tab;tab=b.dataset.t;chat=null;go()});
  go()}
 function go(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));({discover,likes,chats,premium,me:()=>form({id:me.id,email:me.email},me)})[tab]()}
 
