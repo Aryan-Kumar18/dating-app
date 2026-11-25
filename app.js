@@ -21,7 +21,7 @@ function score(a,b){const A=new Set(a.interests||[]),B=b.interests||[],sh=B.filt
 // ---- AUTH ----
 function authView(){const bad=new URLSearchParams(location.hash.slice(1)).get('error_description');if(bad)history.replaceState(null,'',location.pathname);
  app.innerHTML=`<div class="wrap hero"><div class="logo">💞</div><h1>BS Degree<br>Dating App</h1><p class="mut" style="margin:10px 0">For IIT Madras BS students only. Find your person or your study partner.</p>
-<div class="card">${bad?`<p style="color:#e03150;margin-bottom:8px">Sorry, only IITM BS student emails (ds, mg, es, ae .study.iitm.ac.in) can join. Please choose your student account.</p>`:''}
+<div class="card">${bad?`<p style="color:#e03150;margin-bottom:8px">Sign-in was blocked. Only IITM BS student emails (ds, mg, es, ae .study.iitm.ac.in) can join.</p><p class="tiny">Details: ${esc(bad)}</p>`:''}
 <button class="btn" id="gg">Continue with Google</button>
 <p class="tiny">Use your IITM student email (@ds, @mg, @es or @ae .study.iitm.ac.in). Messages are encrypted in transit and at rest. Admins may review reported conversations for safety.</p>
 <p class="tiny"><a href="#" id="alt" style="color:var(--b)">Use an email code instead</a></p>
