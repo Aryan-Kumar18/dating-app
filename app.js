@@ -36,10 +36,13 @@ function authView(){const bad=new URLSearchParams(location.hash.slice(1)).get('e
 
 async function boot(user){
  const{data:ad}=await sb.from('admins').select('*').eq('email',user.email);isAdmin=!!(ad&&ad.length);isSuper=!!(ad&&ad[0]&&ad[0].is_super);
+ const{data:bl}=await sb.from('blocked_users').select('email').eq('email',user.email);if(bl&&bl.length)return blocked('This account cannot use the app. Use Contact us if you think this is a mistake.');
  const{data:p}=await sb.from('profiles').select('*').eq('id',user.id).maybeSingle();
  if(!p)return form(user,{});me=p;
  if(p.status==='suspended'){app.innerHTML=`<div class="wrap hero"><div class="logo">🚫</div><h2>Account suspended</h2><p class="mut">Only an admin can lift this suspension.</p><button class="btn g" onclick="sb.auth.signOut()">Sign out</button></div>`;return}
  shell();live()}
+
+function blocked(m){app.innerHTML=`<div class="wrap hero"><div class="logo">🚫</div><h2>Not eligible</h2><p class="mut" style="margin:10px 0">${esc(m)}</p><button class="btn g" id="ctc">Contact us</button><button class="btn g" id="lo">Sign out</button></div>`;$('#ctc').onclick=()=>contact();$('#lo').onclick=()=>sb.auth.signOut()}
 
 // ---- PROFILE FORM ----
 function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
@@ -51,10 +54,13 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
  <textarea id="bio" rows="3" placeholder="Short bio">${esc(p.bio)}</textarea>
  <p class="mut">Interests (used by AI matching)</p><div class="chips" id="ch">${INTS.map(i=>`<span class="chip ${sel.has(i)?'on':''}">${i}</span>`).join('')}</div>
  <p class="mut">Photo</p><input id="ph" type="file" accept="image/*">
+ ${edit?'':`<label class="tiny" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="ok18" style="width:auto;margin-top:2px"> I am 18 or older and I agree to the <a href="legal.html" target="_blank" style="color:var(--b)">Terms &amp; Privacy</a></label>`}
  <button class="btn" id="sv">Save</button>${edit?`<button class="btn g" id="bk">Back</button>
  <button class="btn g" id="hd">${p.hidden?'Show my profile':'Hide my profile'}</button><button class="btn g" id="ctc">Contact us</button><button class="btn g" id="lo">Sign out</button><button class="btn d" id="dl">Delete my profile &amp; data</button>`:''}</div></div>`;
  $('#ch').onclick=e=>{if(e.target.className.includes('chip')){const t=e.target.textContent;sel.has(t)?sel.delete(t):sel.add(t);e.target.classList.toggle('on')}};
- $('#sv').onclick=async()=>{const age=+$('#ag').value;if(!$('#nm').value||age<18)return toast('Name and age 18+ required');
+ $('#sv').onclick=async()=>{const age=+$('#ag').value;if(!$('#nm').value||!age)return toast('Name and age required');
+  if(age<18){await sb.rpc('block_underage');await sb.from('profiles').delete().eq('id',user.id);return blocked('Sorry, you must be 18 or older to use this app.')}
+  if(!edit&&!$('#ok18').checked)return toast('Please confirm you are 18+ and accept the Terms');
   let photo=p.photo||null,f=$('#ph').files[0];
   if(f){const path=`${user.id}/${Date.now()}.jpg`;const r=await sb.storage.from('photos').upload(path,f);if(r.error)return toast(r.error.message);photo=sb.storage.from('photos').getPublicUrl(path).data.publicUrl}
   const row={id:user.id,name:$('#nm').value,age,cohort:$('#co').value,level:$('#lv').value,looking:$('#lk').value,bio:$('#bio').value,interests:[...sel],photo};
@@ -64,10 +70,10 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
   $('#dl').onclick=async()=>{if(confirm('Delete your profile, matches and messages permanently?')){await sb.from('profiles').delete().eq('id',p.id);sb.auth.signOut()}}}}
 
 // ---- SHELL ----
-function shell(){app.innerHTML=`<div class="wrap" id="v"></div><button id="fab" title="Admin">⚙</button>
+function shell(){app.innerHTML=`<div class="wrap" id="v"></div>
  <nav>${[['discover','🔥','Discover'],['likes','💛','Likes'],['chats','💬','Chats'],['premium','⭐','Premium'],['me','👤','Me']].map(([k,i,l])=>`<button data-t="${k}"><b>${i}</b>${l}</button>`).join('')}</nav>`;
  document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;chat=null;go()});
- $('#fab').onclick=()=>isAdmin?admin():toast('Admins only');go()}
+ go()}
 function go(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));({discover,likes,chats,premium,me:()=>form({id:me.id,email:me.email},me)})[tab]()}
 
 // ---- DISCOVER ----
@@ -145,50 +151,6 @@ async function payNow(){const{data,error}=await sb.functions.invoke('create-orde
 async function pollPrem(i=0){const{data}=await sb.from('profiles').select('*').eq('id',me.id).single();
  if(prem(data)){me=data;toast('⭐ Premium activated!');return premium()}
  if(i<15)setTimeout(()=>pollPrem(i+1),2000);else toast('Payment is processing. Premium will turn on shortly.')}
-
-// ---- ADMIN PANEL ----
-let at='users';
-function admin(){let o=$('#adm');if(!o){o=document.createElement('div');o.id='adm';document.body.appendChild(o)}
- o.innerHTML=`<div class="wrap"><div class="row" style="cursor:default"><h2 style="flex:1;margin:0">Admin panel</h2><button class="btn s g" id="ax">Close</button></div>
- <div class="tabs">${['users','reports','payments','chats','admins','stats'].map(t=>`<span class="chip ${at===t?'on':''}" data-t="${t}">${t}</span>`).join('')}</div><div id="ab"></div></div>`;
- $('#ax').onclick=()=>o.remove();o.querySelectorAll('.tabs .chip').forEach(c=>c.onclick=()=>{at=c.dataset.t;admin()});({users:aUsers,reports:aReports,payments:aPay,chats:aChats,admins:aAdmins,stats:aStats})[at]()}
-const upd=async(id,v)=>{const r=await sb.from('profiles').update(v).eq('id',id);toast(r.error?r.error.message:'Done')};
-async function aUsers(q=''){const b=$('#ab');
- let r=sb.from('profiles').select('*').order('created_at',{ascending:false}).limit(30);if(q)r=r.or(`name.ilike.%${q}%,email.ilike.%${q}%`);const{data}=await r;
- b.innerHTML=`<input id="sq" placeholder="Search name or email" value="${esc(q)}"><button class="btn s" id="sg">Search</button>${(data||[]).map(p=>`<div class="card"><b>${esc(p.name)}</b> <span class="pill">${p.plan}${prem(p)?' ✓':''}</span><span class="pill">${p.status}</span><div class="tiny">${esc(p.email)}${p.paid_until?' · until '+new Date(p.paid_until).toLocaleDateString():''}</div>
- <button class="btn s" data-a="paid" data-i="${p.id}">Mark paid +30d</button><button class="btn s g" data-a="free" data-i="${p.id}">Mark free</button>
- <button class="btn s d" data-a="${p.status==='suspended'?'unsus':'sus'}" data-i="${p.id}">${p.status==='suspended'?'Unsuspend':'Suspend'}</button>
- <button class="btn s g" data-a="ver" data-i="${p.id}">${p.verified?'Unverify':'Verify'}</button><button class="btn s d" data-a="del" data-i="${p.id}">Remove</button></div>`).join('')}`;
- $('#sg').onclick=()=>aUsers($('#sq').value.trim());
- b.querySelectorAll('button[data-a]').forEach(x=>x.onclick=async()=>{const i=x.dataset.i,a=x.dataset.a,p=data.find(z=>z.id===i);
-  if(a==='paid')await upd(i,{plan:'premium',paid_until:day(p.paid_until)});if(a==='free')await upd(i,{plan:'free',paid_until:null});
-  if(a==='sus')await upd(i,{status:'suspended'});if(a==='unsus')await upd(i,{status:'active'});if(a==='ver')await upd(i,{verified:!p.verified});
-  if(a==='del'&&confirm('Remove this user?'))await sb.from('profiles').delete().eq('id',i);aUsers(q)})}
-async function names(ids){const{data}=ids.length?await sb.from('profiles').select('id,name,email').in('id',ids):{data:[]};return Object.fromEntries((data||[]).map(p=>[p.id,p]))}
-async function aReports(){const b=$('#ab');const{data}=await sb.from('reports').select('*').order('created_at',{ascending:false}).limit(50);
- const nm=await names([...new Set((data||[]).flatMap(r=>[r.reporter,r.reported]))]);const N=i=>nm[i]?nm[i].name+' ('+nm[i].email+')':'deleted user';
- b.innerHTML=(data||[]).map(r=>`<div class="card"><b>${esc(N(r.reported))}</b><div class="tiny">reported by ${esc(N(r.reporter))}</div><p>${esc(r.reason)}</p>
- <button class="btn s d" data-s="${r.reported}">Suspend</button><button class="btn s g" data-d="${r.id}">Dismiss</button></div>`).join('')||'<p class="mut">No reports.</p>';
- b.querySelectorAll('[data-s]').forEach(x=>x.onclick=async()=>{await upd(x.dataset.s,{status:'suspended'})});
- b.querySelectorAll('[data-d]').forEach(x=>x.onclick=async()=>{await sb.from('reports').delete().eq('id',x.dataset.d);aReports()})}
-async function aPay(){const b=$('#ab');const{data}=await sb.from('payments').select('*').order('created_at',{ascending:false}).limit(50);const nm=await names((data||[]).map(p=>p.user_id));
- b.innerHTML='<p class="tiny">Payments are automatic (Razorpay). This is a read-only history.</p>'+((data||[]).map(p=>`<div class="card"><b>${esc(nm[p.user_id]?.name)}</b><span class="pill">${p.status}</span><div class="tiny">${esc(nm[p.user_id]?.email)} · ${esc(p.ref)} · ${new Date(p.created_at).toLocaleString()}</div></div>`).join('')||'<p class="mut">No payments yet.</p>')}
-async function aChats(){const b=$('#ab');b.innerHTML=`<p class="tiny">Chat access is for safety reviews. Use responsibly.</p><input id="cq" placeholder="Search user name or email"><button class="btn s" id="cs">Search</button><div id="cr"></div>`;
- $('#cs').onclick=async()=>{const q=$('#cq').value.trim();const{data}=await sb.from('profiles').select('id,name,email').or(`name.ilike.%${q}%,email.ilike.%${q}%`).limit(10);
-  $('#cr').innerHTML=(data||[]).map(p=>`<div class="row" data-u="${p.id}"><b>${esc(p.name)}</b><span class="tiny">${esc(p.email)}</span></div>`).join('');
-  $('#cr').querySelectorAll('.row').forEach(r=>r.onclick=async()=>{const u=r.dataset.u;const{data:ms}=await sb.from('matches').select('*').or(`a.eq.${u},b.eq.${u}`);
-   const nm=await names([...new Set((ms||[]).flatMap(m=>[m.a,m.b]))]);
-   $('#cr').innerHTML=(ms||[]).map(m=>`<div class="row" data-m="${m.id}">${esc(nm[m.a]?.name)} ↔ ${esc(nm[m.b]?.name)}</div>`).join('')||'<p class="mut">No chats.</p>';
-   $('#cr').querySelectorAll('.row').forEach(x=>x.onclick=async()=>{const{data:mm}=await sb.from('messages').select('*').eq('match_id',x.dataset.m).order('created_at');
-    $('#cr').innerHTML=`<div class="msgs">${(mm||[]).map(m=>`<div class="bub ${m.sender===u?'me':''}">${esc(m.body)}</div>`).join('')||'Empty'}</div>`})})}}
-async function aAdmins(){const b=$('#ab');const{data}=await sb.from('admins').select('*');
- b.innerHTML=(data||[]).map(a=>`<div class="row" style="cursor:default"><span style="flex:1">${esc(a.email)}${a.is_super?' <span class="pill">super</span>':''}</span>${isSuper&&!a.is_super?`<button class="btn s d" data-r="${esc(a.email)}">Remove</button>`:''}</div>`).join('')+
- (isSuper?`<input id="ne" type="email" placeholder="New admin email"><button class="btn" id="na">Add admin</button>`:'<p class="tiny">Only the super admin can add or remove admins.</p>');
- if(isSuper){$('#na').onclick=async()=>{const e=$('#ne').value.trim().toLowerCase();const r=await sb.from('admins').insert({email:e});toast(r.error?r.error.message:'Admin added');aAdmins()};
-  b.querySelectorAll('[data-r]').forEach(x=>x.onclick=async()=>{await sb.from('admins').delete().eq('email',x.dataset.r);aAdmins()})}}
-async function aStats(){const c=async(t,f)=>{let q=sb.from(t).select('*',{count:'exact',head:true});if(f)q=f(q);return(await q).count};
- const[u,p,s,m,g,r]=await Promise.all([c('profiles'),c('profiles',q=>q.eq('plan','premium')),c('profiles',q=>q.eq('status','suspended')),c('matches'),c('messages'),c('reports')]);
- $('#ab').innerHTML=Object.entries({Users:u,Premium:p,Suspended:s,Matches:m,Messages:g,Reports:r}).map(([k,v])=>`<div class="card"><span class="mut">${k}</span><h2>${v}</h2></div>`).join('')}
 
 // ---- CONTACT (messages are emailed to you via Web3Forms) ----
 function contact(){const o=document.createElement('div');o.id='cto';o.innerHTML=`<div class="wrap"><h2>Contact us</h2><div class="card"><input id="cn" placeholder="Your name"><input id="ce" type="email" placeholder="Your email (so we can reply)"><textarea id="cm" rows="5" placeholder="Your message"></textarea><button class="btn" id="cs">Send</button><button class="btn g" id="cx">Close</button></div></div>`;document.body.appendChild(o);

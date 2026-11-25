@@ -36,3 +36,6 @@ nav button b{font-size:1.4rem}nav .on{color:var(--a)}
 .tabs{display:flex;gap:6px;overflow:auto;margin:10px 0}.tabs .chip{white-space:nowrap}
 #toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid var(--a);padding:10px 16px;border-radius:14px;z-index:50;display:none;max-width:90%;box-shadow:0 6px 20px rgba(0,0,0,.12)}
 .lock{filter:blur(6px);pointer-events:none}.pill{font-size:.7rem;padding:2px 8px;border-radius:99px;background:var(--soft);color:var(--a);margin-left:4px}
+.wrap.wide{max-width:1000px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+pre{white-space:pre-wrap;word-break:break-all;font-size:.75rem;font-family:ui-monospace,monospace;color:var(--ink)}
