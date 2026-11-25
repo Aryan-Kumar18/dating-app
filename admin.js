@@ -45,7 +45,7 @@ async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*
  <button class="btn s" data-a="paid" data-i="${p.id}">Mark paid +30d</button><button class="btn s g" data-a="free" data-i="${p.id}">Mark free</button>
  <button class="btn s d" data-a="${p.status==='suspended'?'unsus':'sus'}" data-i="${p.id}">${p.status==='suspended'?'Unsuspend':'Suspend'}</button>
  <button class="btn s g" data-a="ver" data-i="${p.id}">${p.verified?'Unverify':'Verify'}</button><button class="btn s g" data-a="edit" data-i="${p.id}">Edit</button>
- <button class="btn s d" data-a="ban" data-i="${p.id}">Remove &amp; ban</button></div>`).join('')||'<p class="mut">No users.</p>'}`;
+ <button class="btn s d" data-a="rm" data-i="${p.id}">Remove</button><button class="btn s d" data-a="ban" data-i="${p.id}">Remove &amp; ban</button></div>`).join('')||'<p class="mut">No users.</p>'}`;
  $('#sg').onclick=()=>aUsers($('#sq').value.trim());
  b.querySelectorAll('button[data-a]').forEach(x=>x.onclick=async()=>{const i=x.dataset.i,a=x.dataset.a,p=data.find(z=>z.id===i);let r;
   if(a==='paid')r=await upd(i,{plan:'premium',paid_until:day(p.paid_until)});
@@ -54,6 +54,7 @@ async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*
   else if(a==='unsus')r=await upd(i,{status:'active'});
   else if(a==='ver')r=await upd(i,{verified:!p.verified});
   else if(a==='edit')return modal('Edit '+p.name,JSON.stringify(p,null,2),async v=>{const{id,...rest}=v;if(ok(await upd(i,rest))){aUsers(q);return true}});
+  else if(a==='rm'){if(!confirm('Delete this user from the database? Their profile, matches and chats are removed. They can sign in again and create a new profile.'))return;r=await sb.from('profiles').delete().eq('id',i)}
   else if(a==='ban'){if(!confirm('Remove this user and block their email from signing in again?'))return;await sb.from('blocked_users').upsert({email:p.email,reason:'removed by admin'});r=await sb.from('profiles').delete().eq('id',i)}
   ok(r);aUsers(q)})}
 
