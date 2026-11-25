@@ -3,18 +3,19 @@ const sb=supabase.createClient(SB_URL,SB_KEY);
 const $=s=>document.querySelector(s), app=$('#app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let tt;function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',3500)}
-const PK={profiles:['id'],swipes:['from_id','to_id'],matches:['id'],messages:['id'],reports:['id'],payments:['id'],allowed_emails:['email'],blocked_users:['email'],admins:['email']};
-const TABS=[['dash','Dashboard'],['users','Users'],['reports','Reports'],['payments','Payments'],['chats','Chats'],['allowed','Allowed emails'],['blocked','Blocked'],['admins','Admins'],['db','Database']];
+const PK={profiles:['id'],swipes:['from_id','to_id'],matches:['id'],messages:['id'],reports:['id'],payments:['id'],allowed_emails:['email'],blocked_users:['email'],admins:['email'],deleted_accounts:['id']};
+const TABS=[['dash','Dashboard'],['users','Users'],['deleted','Deleted accounts'],['reports','Reports'],['payments','Payments'],['chats','Chats'],['allowed','Allowed emails'],['blocked','Blocked'],['admins','Admins'],['db','Database']];
 let me,isSuper=false,at='dash',dbt='profiles';
 const prem=p=>p&&p.plan==='premium'&&p.paid_until&&new Date(p.paid_until)>new Date();
 const day=d=>new Date(Math.max(Date.now(),d?+new Date(d):0)+30*864e5).toISOString();
 const ok=r=>{toast(r&&r.error?'Error: '+r.error.message:'Done ✓');return !(r&&r.error)};
 const fmt=d=>d?new Date(d).toLocaleString():'';
 const upd=(id,v)=>sb.from('profiles').update(v).eq('id',id);
-async function names(ids){const{data}=ids.length?await sb.from('profiles').select('id,name,email').in('id',ids):{data:[]};return Object.fromEntries((data||[]).map(p=>[p.id,p]))}
+async function names(ids){const{data}=ids.length?await sb.from('profiles').select('id,name,email').in('id',ids):{data:[]};const o=Object.fromEntries((data||[]).map(p=>[p.id,p]));
+ const miss=ids.filter(i=>!o[i]);if(miss.length){const{data:d}=await sb.from('deleted_accounts').select('old_user_id,name,email').in('old_user_id',miss);(d||[]).forEach(x=>o[x.old_user_id]={id:x.old_user_id,name:x.name+' (deleted)',email:x.email})}return o}
 
-function modal(title,text,onSave){const o=document.createElement('div');o.id='cto';
- o.innerHTML=`<div class="wrap wide"><h2>${esc(title)}</h2><div class="card"><textarea id="mj" rows="16" style="font-family:monospace;font-size:.8rem">${esc(text)}</textarea><button class="btn" id="mS">Save</button><button class="btn g" id="mX">Cancel</button></div></div>`;
+function modal(title,text,onSave,label='Save'){const o=document.createElement('div');o.id='cto';
+ o.innerHTML=`<div class="wrap wide"><h2>${esc(title)}</h2><div class="card"><textarea id="mj" rows="16" style="font-family:monospace;font-size:.8rem">${esc(text)}</textarea><button class="btn" id="mS">${esc(label)}</button><button class="btn g" id="mX">Cancel</button></div></div>`;
  document.body.appendChild(o);$('#mX').onclick=()=>o.remove();
  $('#mS').onclick=async()=>{let v;try{v=JSON.parse($('#mj').value)}catch(e){return toast('Invalid JSON')}if(await onSave(v))o.remove()}}
 
@@ -29,12 +30,12 @@ function shell(){app.innerHTML=`<div class="wrap wide"><div class="row" style="c
 <div class="tabs">${TABS.map(([k,l])=>`<span class="chip ${at===k?'on':''}" data-t="${k}">${l}</span>`).join('')}</div><div id="ab"></div></div>`;
  $('#lo').onclick=()=>sb.auth.signOut().then(()=>location.reload());
  document.querySelectorAll('.tabs .chip').forEach(c=>c.onclick=()=>{at=c.dataset.t;shell()});
- ({dash:aDash,users:aUsers,reports:aReports,payments:aPay,chats:aChats,allowed:aAllowed,blocked:aBlocked,admins:aAdmins,db:aDb})[at]()}
+ ({dash:aDash,users:aUsers,deleted:aDeleted,reports:aReports,payments:aPay,chats:aChats,allowed:aAllowed,blocked:aBlocked,admins:aAdmins,db:aDb})[at]()}
 
 // ---- DASHBOARD ----
 async function aDash(){const c=async(t,f)=>{let q=sb.from(t).select('*',{count:'exact',head:true});if(f)q=f(q);return(await q).count??0};
- const[u,p,s,m,g,r,a,bl]=await Promise.all([c('profiles'),c('profiles',q=>q.eq('plan','premium')),c('profiles',q=>q.eq('status','suspended')),c('matches'),c('messages'),c('reports'),c('allowed_emails'),c('blocked_users')]);
- $('#ab').innerHTML=`<div class="grid">${Object.entries({Users:u,Premium:p,Suspended:s,Matches:m,Messages:g,Reports:r,'Allowed emails':a,Blocked:bl}).map(([k,v])=>`<div class="card"><span class="mut">${k}</span><h2>${v}</h2></div>`).join('')}</div>`}
+ const[u,p,s,m,g,r,a,bl,dl]=await Promise.all([c('profiles'),c('profiles',q=>q.eq('plan','premium')),c('profiles',q=>q.eq('status','suspended')),c('matches'),c('messages'),c('reports'),c('allowed_emails'),c('blocked_users'),c('deleted_accounts')]);
+ $('#ab').innerHTML=`<div class="grid">${Object.entries({Users:u,Premium:p,Suspended:s,Matches:m,Messages:g,Reports:r,'Allowed emails':a,Blocked:bl,'Deleted accounts':dl}).map(([k,v])=>`<div class="card"><span class="mut">${k}</span><h2>${v}</h2></div>`).join('')}</div>`}
 
 // ---- USERS ----
 async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*').order('created_at',{ascending:false}).limit(40);if(q)r=r.or(`name.ilike.%${q}%,email.ilike.%${q}%`);const{data,error}=await r;
@@ -55,6 +56,16 @@ async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*
   else if(a==='edit')return modal('Edit '+p.name,JSON.stringify(p,null,2),async v=>{const{id,...rest}=v;if(ok(await upd(i,rest))){aUsers(q);return true}});
   else if(a==='ban'){if(!confirm('Remove this user and block their email from signing in again?'))return;await sb.from('blocked_users').upsert({email:p.email,reason:'removed by admin'});r=await sb.from('profiles').delete().eq('id',i)}
   ok(r);aUsers(q)})}
+
+// ---- DELETED ACCOUNTS ----
+async function aDeleted(){const b=$('#ab');const{data,error}=await sb.from('deleted_accounts').select('*').order('deleted_at',{ascending:false}).limit(50);
+ b.innerHTML=`<p class="tiny">Accounts that users deleted themselves. They are hidden from everyone else, and the person can sign up again with the same email as a new profile. <b>Delete forever</b> removes the record and photo from the database for good.</p>${error?`<p style="color:#e03150">${esc(error.message)}</p>`:''}
+ ${(data||[]).map(d=>`<div class="card"><b>${esc(d.name)}</b> <span class="pill">deleted</span><div class="tiny">${esc(d.email)} · deleted ${fmt(d.deleted_at)} · ${(d.matches||[]).length} matches · ${(d.messages||[]).length} messages</div>
+ <button class="btn s g" data-v="${d.id}">View data</button><button class="btn s d" data-f="${d.id}">Delete forever</button></div>`).join('')||'<p class="mut">No deleted accounts.</p>'}`;
+ b.querySelectorAll('[data-v]').forEach(x=>x.onclick=()=>{const d=data.find(z=>String(z.id)===x.dataset.v);modal('Deleted account: '+d.name,JSON.stringify(d,null,2),async()=>true,'Close')});
+ b.querySelectorAll('[data-f]').forEach(x=>x.onclick=async()=>{const d=data.find(z=>String(z.id)===x.dataset.f);if(!confirm('Permanently delete this record? This cannot be undone.'))return;
+  const ph=d.profile&&d.profile.photo;if(ph&&ph.includes('/photos/'))await sb.storage.from('photos').remove([decodeURIComponent(ph.split('/photos/')[1].split('?')[0])]);
+  ok(await sb.from('deleted_accounts').delete().eq('id',d.id));aDeleted()})}
 
 // ---- REPORTS ----
 async function aReports(){const b=$('#ab');const{data}=await sb.from('reports').select('*').order('created_at',{ascending:false}).limit(60);

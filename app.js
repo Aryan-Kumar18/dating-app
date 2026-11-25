@@ -67,7 +67,7 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
   const{error}=await sb.from('profiles').upsert(row);if(error)return toast(error.message);boot(user)};
  if(edit){$('#bk').onclick=()=>shell();$('#ctc').onclick=()=>contact();$('#lo').onclick=()=>sb.auth.signOut();
   $('#hd').onclick=async()=>{await sb.from('profiles').update({hidden:!p.hidden}).eq('id',p.id);boot(user)};
-  $('#dl').onclick=async()=>{if(confirm('Delete your profile, matches and messages permanently?')){await sb.from('profiles').delete().eq('id',p.id);sb.auth.signOut()}}}}
+  $('#dl').onclick=async()=>{if(confirm('Delete your profile? Your profile, matches and chats disappear for everyone. You can create a new profile later with the same email.')){await sb.rpc('delete_my_account');sb.auth.signOut()}}}}
 
 // ---- SHELL ----
 function shell(){app.innerHTML=`<div class="wrap" id="v"></div>
