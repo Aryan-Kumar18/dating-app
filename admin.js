@@ -1,10 +1,30 @@
 const SB_URL='https://rmywttlijzpmfwsamjlu.supabase.co', SB_KEY='sb_publishable_Z6-8OfMYsbKTRPkMHejQaQ_uL1SqWZu';
+
+// TODO: PREMIUM LAUNCH TOGGLE — keep in sync with app.js
+// When true, Payments tab is hidden from Admin navigation (set to false when enabling paid plans).
+const PREMIUM_LAUNCH_FREE = true;
+
 const sb=supabase.createClient(SB_URL,SB_KEY);
 const $=s=>document.querySelector(s), app=$('#app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let tt;function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',3500)}
-const PK={profiles:['id'],swipes:['from_id','to_id'],matches:['id'],messages:['id'],reports:['id'],payments:['id'],allowed_emails:['email'],blocked_users:['email'],admins:['email'],deleted_accounts:['id']};
-const TABS=[['dash','Dashboard'],['users','Users'],['deleted','Deleted accounts'],['reports','Reports'],['payments','Payments'],['chats','Chats'],['allowed','Allowed emails'],['blocked','Blocked'],['admins','Admins'],['db','Database']];
+const PK={profiles:['id'],events:['id'],swipes:['from_id','to_id'],matches:['id'],messages:['id'],reports:['id'],payments:['id'],allowed_emails:['email'],blocked_users:['email'],admins:['email'],deleted_accounts:['id']};
+
+// TODO: PAYMENTS TAB — hidden while PREMIUM_LAUNCH_FREE is true; automatically reappears when set to false
+const TABS=[
+ ['dash','Dashboard'],
+ ['events','Events'],
+ ['users','Users'],
+ ['deleted','Deleted accounts'],
+ ['reports','Reports'],
+ ...(PREMIUM_LAUNCH_FREE?[]:[['payments','Payments']]),
+ ['chats','Chats'],
+ ['allowed','Allowed emails'],
+ ['blocked','Blocked'],
+ ['admins','Admins'],
+ ['db','Database']
+];
+
 let me,isSuper=false,at='dash',dbt='profiles';
 const prem=p=>p&&p.plan==='premium'&&p.paid_until&&new Date(p.paid_until)>new Date();
 const day=d=>new Date(Math.max(Date.now(),d?+new Date(d):0)+30*864e5).toISOString();
@@ -27,16 +47,105 @@ async function init(){const{data:{session}}=await sb.auth.getSession();if(!sessi
  me=session.user;const{data}=await sb.from('admins').select('*').eq('email',me.email);
  if(!data||!data.length){app.innerHTML=`<div class="wrap hero"><div class="logo">🚫</div><h2>Access denied</h2><p class="mut" style="margin:10px 0">${esc(me.email)} is not an admin.</p><button class="btn g" id="lo">Sign out</button></div>`;$('#lo').onclick=()=>sb.auth.signOut().then(()=>location.reload());return}
  isSuper=!!data[0].is_super;shell()}
-function shell(){app.innerHTML=`<div class="wrap wide"><div class="row" style="cursor:default"><h2 style="flex:1;margin:0">🛡️ Admin ${isSuper?'<span class="pill">super</span>':''}</h2><span class="tiny">${esc(me.email)}</span><button class="btn s g" id="lo">Sign out</button></div>
+
+function shell(){
+ if(PREMIUM_LAUNCH_FREE && at==='payments')at='dash';
+ app.innerHTML=`<div class="wrap wide"><div class="row" style="cursor:default"><h2 style="flex:1;margin:0">🛡️ Admin ${isSuper?'<span class="pill">super</span>':''}</h2><span class="tiny">${esc(me.email)}</span><button class="btn s g" id="lo">Sign out</button></div>
 <div class="tabs">${TABS.map(([k,l])=>`<span class="chip ${at===k?'on':''}" data-t="${k}">${l}</span>`).join('')}</div><div id="ab"></div></div>`;
  $('#lo').onclick=()=>sb.auth.signOut().then(()=>location.reload());
  document.querySelectorAll('.tabs .chip').forEach(c=>c.onclick=()=>{at=c.dataset.t;shell()});
- ({dash:aDash,users:aUsers,deleted:aDeleted,reports:aReports,payments:aPay,chats:aChats,allowed:aAllowed,blocked:aBlocked,admins:aAdmins,db:aDb})[at]()}
+ ({dash:aDash,events:aEvents,users:aUsers,deleted:aDeleted,reports:aReports,payments:aPay,chats:aChats,allowed:aAllowed,blocked:aBlocked,admins:aAdmins,db:aDb})[at]()}
 
 // ---- DASHBOARD ----
 async function aDash(){const c=async(t,f)=>{let q=sb.from(t).select('*',{count:'exact',head:true});if(f)q=f(q);return(await q).count??0};
  const[u,p,s,m,g,r,a,bl,dl]=await Promise.all([c('profiles'),c('profiles',q=>q.eq('plan','premium')),c('profiles',q=>q.eq('status','suspended')),c('matches'),c('messages'),c('reports'),c('allowed_emails'),c('blocked_users'),c('deleted_accounts')]);
- $('#ab').innerHTML=`<div class="grid">${Object.entries({Users:u,Premium:p,Suspended:s,Matches:m,Messages:g,Reports:r,'Allowed emails':a,Blocked:bl,'Deleted accounts':dl}).map(([k,v])=>`<div class="card"><span class="mut">${k}</span><h2>${v}</h2></div>`).join('')}</div>`}
+ $('#ab').innerHTML=`${PREMIUM_LAUNCH_FREE?'<div class="card"><span class="pill">Launch Mode</span> <span class="tiny">All users currently have free Premium access. Toggle <code>PREMIUM_LAUNCH_FREE = false</code> in app.js &amp; admin.js later to enable billing.</span></div>':''}
+ <div class="grid">${Object.entries({Users:u,'Paid Premium':p,Suspended:s,Matches:m,Messages:g,Reports:r,'Allowed emails':a,Blocked:bl,'Deleted accounts':dl}).map(([k,v])=>`<div class="card"><span class="mut">${k}</span><h2>${v}</h2></div>`).join('')}</div>`}
+
+// ---- EVENTS MANAGER ----
+async function aEvents(){
+ const b=$('#ab');
+ let list=[],useLocal=false;
+ const{data,error}=await sb.from('events').select('*').order('created_at',{ascending:false});
+ if(error){
+  useLocal=true;
+  list=JSON.parse(localStorage.getItem('bs_events')||'[]');
+ }else{
+  list=data||[];
+ }
+ b.innerHTML=`<div class="card">
+  <b>➕ Add New Campus Event</b>
+  <p class="tiny">Events published here appear right at the top of the Discover home screen for students.</p>
+  ${useLocal?'<p class="tiny" style="color:var(--c)">Note: <code>events</code> table not created in Supabase yet — saving to local preview storage. Run the events SQL snippet to sync across all devices.</p>':''}
+  <input id="evTitle" placeholder="Event title (e.g. Paradox Night Meetup / Study Jam)">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+   <input id="evDate" placeholder="Date & Time (e.g. Sat, Nov 28 · 7 PM)">
+   <input id="evLoc" placeholder="Location (e.g. OAT / Discord / Chennai)">
+  </div>
+  <input id="evBadge" placeholder="Badge label (e.g. Live, Registration Open, This Weekend)" value="Upcoming">
+  <textarea id="evDesc" rows="3" placeholder="Short description or pairing details..."></textarea>
+  <button class="btn" id="evAdd">Publish Event</button>
+ </div>
+ <h2 style="margin-top:16px">Active &amp; Past Events (${list.length})</h2>
+ ${list.map(ev=>`<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+   <b>${esc(ev.title)}</b>
+   <div><span class="pill">${esc(ev.badge||'Upcoming')}</span><span class="pill">${ev.active!==false?'Visible':'Hidden'}</span></div>
+  </div>
+  <div class="tiny">${[ev.event_date,ev.location].filter(Boolean).map(esc).join(' · ')}</div>
+  ${ev.description?`<p style="margin:8px 0;font-size:.92rem">${esc(ev.description)}</p>`:''}
+  <button class="btn s g" data-tog="${ev.id}">${ev.active!==false?'Hide':'Show'}</button>
+  <button class="btn s d" data-del="${ev.id}">Delete</button>
+ </div>`).join('')||'<p class="mut">No events created yet. Users currently see the default "Coming soon" banner.</p>'}`;
+
+ $('#evAdd').onclick=async()=>{
+  const title=$('#evTitle').value.trim();
+  if(!title)return toast('Event title is required');
+  const item={
+   title,
+   event_date:$('#evDate').value.trim(),
+   location:$('#evLoc').value.trim(),
+   badge:$('#evBadge').value.trim()||'Upcoming',
+   description:$('#evDesc').value.trim(),
+   active:true
+  };
+  if(useLocal){
+   item.id='loc_'+Date.now();
+   list.unshift(item);
+   localStorage.setItem('bs_events',JSON.stringify(list));
+   toast('Event saved locally ✓');
+   return aEvents();
+  }
+  ok(await sb.from('events').insert(item));
+  aEvents();
+ };
+
+ b.querySelectorAll('[data-tog]').forEach(btn=>btn.onclick=async()=>{
+  const id=btn.dataset.tog,ev=list.find(x=>String(x.id)===id);
+  if(!ev)return;
+  if(useLocal){
+   ev.active=!(ev.active!==false);
+   localStorage.setItem('bs_events',JSON.stringify(list));
+   toast('Updated ✓');
+   return aEvents();
+  }
+  ok(await sb.from('events').update({active:!(ev.active!==false)}).eq('id',id));
+  aEvents();
+ });
+
+ b.querySelectorAll('[data-del]').forEach(btn=>btn.onclick=async()=>{
+  if(!confirm('Delete this event?'))return;
+  const id=btn.dataset.del;
+  if(useLocal){
+   list=list.filter(x=>String(x.id)!==id);
+   localStorage.setItem('bs_events',JSON.stringify(list));
+   toast('Deleted ✓');
+   return aEvents();
+  }
+  ok(await sb.from('events').delete().eq('id',id));
+  aEvents();
+ });
+}
 
 // ---- USERS ----
 async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*').order('created_at',{ascending:false}).limit(40);if(q)r=r.or(`name.ilike.%${q}%,email.ilike.%${q}%`);const{data,error}=await r;
@@ -44,7 +153,7 @@ async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*
  ${(data||[]).map(p=>`<div class="card"><b>${esc(p.name)}, ${esc(p.age)}</b> <span class="pill">${esc(p.plan)}${prem(p)?' ✓':''}</span><span class="pill">${esc(p.status)}</span>${p.hidden?'<span class="pill">hidden</span>':''}
  <div class="gal" style="max-width:380px;grid-template-columns:repeat(5,1fr)">${[p.photo,...(p.photos||[])].filter(Boolean).map(u=>`<a href="${esc(u)}" target="_blank" class="gi"><img src="${esc(u)}"></a>`).join('')}</div>
  <div class="tiny">${esc(p.email)} · ${esc(p.level)} · ${esc(p.cohort)}${p.paid_until?' · premium until '+new Date(p.paid_until).toLocaleDateString():''}</div>
- <button class="btn s" data-a="paid" data-i="${p.id}">Mark paid +30d</button><button class="btn s g" data-a="free" data-i="${p.id}">Mark free</button>
+ ${PREMIUM_LAUNCH_FREE?'':`<button class="btn s" data-a="paid" data-i="${p.id}">Mark paid +30d</button><button class="btn s g" data-a="free" data-i="${p.id}">Mark free</button>`}
  <button class="btn s d" data-a="${p.status==='suspended'?'unsus':'sus'}" data-i="${p.id}">${p.status==='suspended'?'Unsuspend':'Suspend'}</button>
  <button class="btn s g" data-a="ver" data-i="${p.id}">${p.verified?'Unverify':'Verify'}</button><button class="btn s g" data-a="edit" data-i="${p.id}">Edit</button>
  <button class="btn s g" data-a="clr" data-i="${p.id}">Clear photos</button> <button class="btn s d" data-a="rm" data-i="${p.id}">Remove</button><button class="btn s d" data-a="ban" data-i="${p.id}">Remove &amp; ban</button></div>`).join('')||'<p class="mut">No users.</p>'}`;
@@ -79,7 +188,7 @@ async function aReports(){const b=$('#ab');const{data}=await sb.from('reports').
  b.querySelectorAll('[data-s]').forEach(x=>x.onclick=async()=>{ok(await upd(x.dataset.s,{status:'suspended'}))});
  b.querySelectorAll('[data-d]').forEach(x=>x.onclick=async()=>{ok(await sb.from('reports').delete().eq('id',x.dataset.d));aReports()})}
 
-// ---- PAYMENTS ----
+// ---- PAYMENTS (kept for future activation) ----
 async function aPay(){const b=$('#ab');const{data}=await sb.from('payments').select('*').order('created_at',{ascending:false}).limit(60);const nm=await names((data||[]).map(p=>p.user_id));
  b.innerHTML='<p class="tiny">Payments are automatic (Razorpay). To give premium by hand, use Users → Mark paid.</p>'+((data||[]).map(p=>`<div class="card"><b>${esc(nm[p.user_id]?.name)}</b><span class="pill">${esc(p.status)}</span><div class="tiny">${esc(nm[p.user_id]?.email)} · ${esc(p.ref)} · ${fmt(p.created_at)}</div></div>`).join('')||'<p class="mut">No payments yet.</p>')}
 
@@ -96,7 +205,7 @@ async function showChat(mid,u){const{data}=await sb.from('messages').select('*')
  $('#bk').onclick=()=>userChats(u);$('#dm').onclick=async()=>{if(confirm('Delete this match and all its messages?')){ok(await sb.from('matches').delete().eq('id',mid));userChats(u)}};
  $('#cr').querySelectorAll('[data-x]').forEach(x=>x.onclick=async()=>{ok(await sb.from('messages').delete().eq('id',x.dataset.x));showChat(mid,u)})}
 
-// ---- ALLOWED EMAILS (non-student logins) ----
+// ---- ALLOWED EMAILS ----
 async function aAllowed(){const b=$('#ab');const{data}=await sb.from('allowed_emails').select('*').order('created_at',{ascending:false});
  b.innerHTML=`<div class="card"><b>Let non-student emails log in</b><p class="tiny">Add testers' Gmail or any email. One per line or separated by commas. Removing an email only stops new sign-ups. To stop an existing user, use Users → Remove &amp; ban.</p><textarea id="ae" rows="3" placeholder="friend@gmail.com"></textarea><input id="an" placeholder="Note (optional)"><button class="btn" id="aa">Add</button></div>
  ${(data||[]).map(a=>`<div class="row" style="cursor:default"><span style="flex:1">${esc(a.email)}<div class="tiny">${esc(a.note)}</div></span><button class="btn s d" data-r="${esc(a.email)}">Remove</button></div>`).join('')}`;
@@ -118,7 +227,7 @@ async function aAdmins(){const b=$('#ab');const{data}=await sb.from('admins').se
  if(isSuper){$('#na').onclick=async()=>{const e=$('#ne').value.trim().toLowerCase();if(!e)return;ok(await sb.from('admins').insert({email:e}));aAdmins()};
   b.querySelectorAll('[data-r]').forEach(x=>x.onclick=async()=>{if(confirm('Remove this admin?')){ok(await sb.from('admins').delete().eq('email',x.dataset.r));aAdmins()}})}}
 
-// ---- DATABASE EDITOR (any table, any row) ----
+// ---- DATABASE EDITOR ----
 async function aDb(){const b=$('#ab');const{data,error}=await sb.from(dbt).select('*').limit(100);
  b.innerHTML=`<div class="send"><select id="dt" style="margin:0">${Object.keys(PK).map(x=>`<option ${x===dbt?'selected':''}>${x}</option>`).join('')}</select><button class="btn s" id="da">+ Add row</button></div>
  <p class="tiny">Up to 100 rows shown. Changes here edit the live database directly. Be careful.${dbt==='admins'&&!isSuper?' Only the super admin can change admins.':''}</p>${error?`<p style="color:#e03150">${esc(error.message)}</p>`:''}
