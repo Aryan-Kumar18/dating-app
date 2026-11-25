@@ -7,10 +7,18 @@ const $=s=>document.querySelector(s), app=$('#app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const INTS=['Coding','Data Science','Machine Learning','Maths','Statistics','Gaming','Anime','Movies','Music','Cricket','Football','Gym','Reading','Travel','Cooking','Photography','Startups','Finance','Chess','Art','Memes','Night owl study','Morning study'];
 const LV=['Foundation','Diploma','BSc Degree','BS Degree'], LOOK=['Dating','Study partner','Both'];
-let prevTab='discover';
+let prevTab='discover',pi=0;
 let me,isAdmin=false,isSuper=false,tab='discover',deck=[],last=null,n=0,showAd=false,chat=null,F={looking:'All',level:'All'};
 const prem=p=>p&&p.plan==='premium'&&p.paid_until&&new Date(p.paid_until)>new Date();
-const imgOf=p=>p.photo?`<img src="${esc(p.photo)}" alt="">`:`<div class="ph">🙂</div>`;
+const plist=p=>[p.photo,...(p.photos||[])].filter(Boolean);
+const imgOf=(p,i=0)=>{const l=plist(p);return l.length?`<img src="${esc(l[Math.min(i,l.length-1)])}" alt="">`:`<div class="ph">🙂</div>`};
+const dots=(p,i)=>{const n=plist(p).length;return n>1?`<div class="dots">${Array.from({length:n},(_,k)=>`<i class="${k===i?'on':''}"></i>`).join('')}</div>`:''};
+const pathOf=u=>decodeURIComponent(u.split('/photos/')[1].split('?')[0]);
+const isHeic=f=>/hei[cf]/i.test(f.type||'')||/\.hei[cf]$/i.test(f.name||'');
+async function toJpeg(f){if(!isHeic(f))return f;
+ try{if(!window.heic2any)await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';s.onload=ok;s.onerror=no;document.head.appendChild(s)});
+  const r=await heic2any({blob:f,toType:'image/jpeg',quality:.85});return Array.isArray(r)?r[0]:r}catch(e){return null}}
+async function shrink(f,max=1000){f=await toJpeg(f);if(!f)return null;return new Promise(res=>{const img=new Image(),u=URL.createObjectURL(f);img.onload=()=>{const k=Math.min(1,max/Math.max(img.width,img.height)),c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(b=>res(b),'image/jpeg',.82)};img.onerror=()=>res(null);img.src=u})}
 const av=p=>p.photo?`<img class="av" src="${esc(p.photo)}">`:`<div class="av">🙂</div>`;
 let tt;function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',3500)}
 const day=d=>new Date(Math.max(Date.now(),d?new Date(d):0)+30*864e5).toISOString();
@@ -54,18 +62,30 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
  <select id="lk">${LOOK.map(x=>`<option ${p.looking===x?'selected':''}>${x}</option>`).join('')}</select>
  <textarea id="bio" rows="3" placeholder="Short bio">${esc(p.bio)}</textarea>
  <p class="mut">Interests (used by AI matching)</p><div class="chips" id="ch">${INTS.map(i=>`<span class="chip ${sel.has(i)?'on':''}">${i}</span>`).join('')}</div>
- <p class="mut">Photo</p><input id="ph" type="file" accept="image/*">
+ <p class="mut">Profile picture</p><div class="mainph"><div id="mp"></div><button class="btn s g" type="button" id="mpb">Add / change picture</button><input id="mpf" type="file" accept="image/*,.heic,.heif" hidden></div>
+ <p class="mut">More photos (up to 4)</p><div class="gal" id="gl"></div><input id="gf" type="file" accept="image/*,.heic,.heif" multiple hidden>
  ${edit?'':`<label class="tiny" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="ok18" style="width:auto;margin-top:2px"> I am 18 or older and I agree to the <a href="legal.html" target="_blank" style="color:var(--b)">Terms &amp; Privacy</a></label>`}
  <button class="btn" id="sv">Save</button>${edit?`<button class="btn g" id="bk">Back</button>
  <button class="btn g" id="hd">${p.hidden?'Show my profile':'Hide my profile'}</button><button class="btn g" id="ctc">Contact us</button><button class="btn g" id="lo">Sign out</button><button class="btn d" id="dl">Delete my profile &amp; data</button>`:''}</div></div>`;
+ let main={url:p.photo||null},gal=(p.photos||[]).map(u=>({url:u})),removed=[];
+ const paint=()=>{$('#mp').innerHTML=main.url?`<img class="av big" src="${esc(main.url)}">`:`<div class="av big">🙂</div>`;
+  $('#gl').innerHTML=gal.map((g,i)=>`<div class="gi"><img src="${esc(g.url)}"><b data-r="${i}">✕</b></div>`).join('')+(gal.length<4?'<div class="gi" id="ga">+</div>':'');
+  document.querySelectorAll('#gl [data-r]').forEach(x=>x.onclick=()=>{const g=gal.splice(+x.dataset.r,1)[0];if(!g.file)removed.push(g.url);paint()});
+  if($('#ga'))$('#ga').onclick=()=>$('#gf').click()};paint();
+ $('#mpb').onclick=()=>$('#mpf').click();
+ $('#mpf').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const b=await shrink(f);if(!b)return toast('Could not read that image');if(main.url&&!main.file)removed.push(main.url);main={url:URL.createObjectURL(b),file:b};paint()};
+ $('#gf').onchange=async e=>{for(const f of [...e.target.files].slice(0,4-gal.length)){const b=await shrink(f);if(b)gal.push({url:URL.createObjectURL(b),file:b});else toast('Could not read one image')}e.target.value='';paint()};
  $('#ch').onclick=e=>{if(e.target.className.includes('chip')){const t=e.target.textContent;sel.has(t)?sel.delete(t):sel.add(t);e.target.classList.toggle('on')}};
  $('#sv').onclick=async()=>{const age=+$('#ag').value;if(!$('#nm').value||!age)return toast('Name and age required');
-  if(age<18){await sb.rpc('block_underage');await sb.from('profiles').delete().eq('id',user.id);return blocked('Sorry, you must be 18 or older to use this app.')}
+  if(age<18){await sb.rpc('block_underage');const ps=plist(p).filter(u=>u.includes('/photos/')).map(pathOf);if(ps.length)await sb.storage.from('photos').remove(ps);await sb.from('profiles').delete().eq('id',user.id);return blocked('Sorry, you must be 18 or older to use this app.')}
   if(!edit&&!$('#ok18').checked)return toast('Please confirm you are 18+ and accept the Terms');
-  let photo=p.photo||null,f=$('#ph').files[0];
-  if(f){const path=`${user.id}/${Date.now()}.jpg`;const r=await sb.storage.from('photos').upload(path,f);if(r.error)return toast(r.error.message);photo=sb.storage.from('photos').getPublicUrl(path).data.publicUrl}
-  const row={id:user.id,name:$('#nm').value,age,cohort:$('#co').value,level:$('#lv').value,looking:$('#lk').value,bio:$('#bio').value,interests:[...sel],photo};
-  const{error}=await sb.from('profiles').upsert(row);if(error)return toast(error.message);
+  if(!main.url)return toast('Please add a profile picture');
+  const btn=$('#sv');btn.disabled=true;btn.textContent='Saving...';
+  const up=async f=>{const path=`${user.id}/${Date.now()}_${Math.random().toString(36).slice(2,7)}.jpg`;const r=await sb.storage.from('photos').upload(path,f,{contentType:'image/jpeg'});if(r.error)throw r.error;return sb.storage.from('photos').getPublicUrl(path).data.publicUrl};
+  let photo,photos=[];try{photo=main.file?await up(main.file):main.url;for(const g of gal)photos.push(g.file?await up(g.file):g.url)}catch(e){btn.disabled=false;btn.textContent='Save';return toast('Photo upload failed: '+e.message)}
+  const row={id:user.id,name:$('#nm').value,age,cohort:$('#co').value,level:$('#lv').value,looking:$('#lk').value,bio:$('#bio').value,interests:[...sel],photo,photos};
+  const{error}=await sb.from('profiles').upsert(row);if(error){btn.disabled=false;btn.textContent='Save';return toast(error.message)}
+  if(removed.length)sb.storage.from('photos').remove(removed.filter(u=>u.includes('/photos/')).map(pathOf)).then(()=>{},()=>{});
   if(edit){tab=prevTab;deck=[];last=null;toast('Profile saved ✓')}boot(user)};
  if(edit){$('#bk').onclick=()=>{tab=prevTab;shell()};$('#ctc').onclick=()=>contact();$('#lo').onclick=()=>sb.auth.signOut();
   $('#hd').onclick=async()=>{await sb.from('profiles').update({hidden:!p.hidden}).eq('id',p.id);boot(user)};
@@ -87,10 +107,11 @@ async function discover(){
  let body;
  if(showAd&&!prem(me))body=`<div class="ad">📢 Ad space<br><small>Free tier ads. Go Premium to remove.</small></div><div class="acts"><button class="btn" id="ct">Continue</button></div>`;
  else if(!p)body=`<div class="card">No more profiles right now. Try changing filters or check back soon.</div>`;
- else{const s=p._s;body=`<div class="pcard">${imgOf(p)}<div class="score">🤖 ${s.pct}% match</div><div class="info"><h2>${esc(p.name)}, ${p.age} ${p.verified?'✅':''}</h2><div class="mut">${esc(p.level)} · ${esc(p.cohort)} · ${esc(p.looking)}</div><p style="margin:6px 0">${esc(p.bio)}</p>
+ else{const s=p._s;body=`<div class="pcard"><div id="pimg">${imgOf(p,pi)}</div>${dots(p,pi)}<div class="score">🤖 ${s.pct}% match</div><div class="info"><h2>${esc(p.name)}, ${p.age} ${p.verified?'✅':''}</h2><div class="mut">${esc(p.level)} · ${esc(p.cohort)} · ${esc(p.looking)}</div><p style="margin:6px 0">${esc(p.bio)}</p>
  <div class="chips">${(p.interests||[]).map(i=>`<span class="chip ${s.sh.includes(i)?'sh':''}">${esc(i)}</span>`).join('')}</div></div></div>
  <div class="acts"><button class="rb" id="x">✕</button>${prem(me)?'<button class="rb" id="u">↩</button>':''}<button class="rb" id="s">⭐</button><button class="rb" id="l">💚</button></div>`}
  v.innerHTML=fl+body;
+ if(p&&$('#pimg'))$('#pimg').onclick=e=>{const n=plist(p).length;if(n<2)return;const r=e.currentTarget.getBoundingClientRect();pi=e.clientX-r.left<r.width/2?Math.max(0,pi-1):Math.min(n-1,pi+1);discover()};
  $('#fk').onchange=e=>{F.looking=e.target.value;deck=[];last=null;discover()};$('#fl').onchange=e=>{F.level=e.target.value;deck=[];last=null;discover()};
  if($('#ct'))$('#ct').onclick=()=>{showAd=false;discover()};
  if(p&&!showAd){$('#x').onclick=()=>swipe('pass');$('#s').onclick=()=>swipe('super');$('#l').onclick=()=>swipe('like');
@@ -102,7 +123,7 @@ async function loadDeck(){
 async function swipe(kind){const p=deck[0];
  const{error}=await sb.from('swipes').insert({from_id:me.id,to_id:p.id,kind});
  if(error)return toast(error.message.includes('LIMIT')?'Daily limit of 20 likes reached. Go Premium for unlimited!':error.message);
- last=p;deck.shift();n++;if(n%5===0)showAd=true;
+ last=p;deck.shift();pi=0;n++;if(n%5===0)showAd=true;
  if(kind!=='pass'){const[a,b]=[me.id,p.id].sort();const{data}=await sb.from('matches').select('id').eq('a',a).eq('b',b);if(data&&data.length)toast("🎉 It's a match with "+p.name+'!')}
  discover()}
 

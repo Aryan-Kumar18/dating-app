@@ -10,6 +10,7 @@ const prem=p=>p&&p.plan==='premium'&&p.paid_until&&new Date(p.paid_until)>new Da
 const day=d=>new Date(Math.max(Date.now(),d?+new Date(d):0)+30*864e5).toISOString();
 const ok=r=>{toast(r&&r.error?'Error: '+r.error.message:'Done ✓');return !(r&&r.error)};
 const fmt=d=>d?new Date(d).toLocaleString():'';
+const wipe=async p=>{const ps=[p.photo,...(p.photos||[])].filter(u=>u&&u.includes('/photos/')).map(u=>decodeURIComponent(u.split('/photos/')[1].split('?')[0]));if(ps.length)await sb.storage.from('photos').remove(ps)};
 const upd=(id,v)=>sb.from('profiles').update(v).eq('id',id);
 async function names(ids){const{data}=ids.length?await sb.from('profiles').select('id,name,email').in('id',ids):{data:[]};const o=Object.fromEntries((data||[]).map(p=>[p.id,p]));
  const miss=ids.filter(i=>!o[i]);if(miss.length){const{data:d}=await sb.from('deleted_accounts').select('old_user_id,name,email').in('old_user_id',miss);(d||[]).forEach(x=>o[x.old_user_id]={id:x.old_user_id,name:x.name+' (deleted)',email:x.email})}return o}
@@ -41,11 +42,12 @@ async function aDash(){const c=async(t,f)=>{let q=sb.from(t).select('*',{count:'
 async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*').order('created_at',{ascending:false}).limit(40);if(q)r=r.or(`name.ilike.%${q}%,email.ilike.%${q}%`);const{data,error}=await r;
  b.innerHTML=`<div class="send"><input id="sq" placeholder="Search name or email" value="${esc(q)}"><button class="btn" id="sg" style="width:90px">Search</button></div>${error?`<p style="color:#e03150">${esc(error.message)}</p>`:''}
  ${(data||[]).map(p=>`<div class="card"><b>${esc(p.name)}, ${esc(p.age)}</b> <span class="pill">${esc(p.plan)}${prem(p)?' ✓':''}</span><span class="pill">${esc(p.status)}</span>${p.hidden?'<span class="pill">hidden</span>':''}
+ <div class="gal" style="max-width:380px;grid-template-columns:repeat(5,1fr)">${[p.photo,...(p.photos||[])].filter(Boolean).map(u=>`<a href="${esc(u)}" target="_blank" class="gi"><img src="${esc(u)}"></a>`).join('')}</div>
  <div class="tiny">${esc(p.email)} · ${esc(p.level)} · ${esc(p.cohort)}${p.paid_until?' · premium until '+new Date(p.paid_until).toLocaleDateString():''}</div>
  <button class="btn s" data-a="paid" data-i="${p.id}">Mark paid +30d</button><button class="btn s g" data-a="free" data-i="${p.id}">Mark free</button>
  <button class="btn s d" data-a="${p.status==='suspended'?'unsus':'sus'}" data-i="${p.id}">${p.status==='suspended'?'Unsuspend':'Suspend'}</button>
  <button class="btn s g" data-a="ver" data-i="${p.id}">${p.verified?'Unverify':'Verify'}</button><button class="btn s g" data-a="edit" data-i="${p.id}">Edit</button>
- <button class="btn s d" data-a="rm" data-i="${p.id}">Remove</button><button class="btn s d" data-a="ban" data-i="${p.id}">Remove &amp; ban</button></div>`).join('')||'<p class="mut">No users.</p>'}`;
+ <button class="btn s g" data-a="clr" data-i="${p.id}">Clear photos</button> <button class="btn s d" data-a="rm" data-i="${p.id}">Remove</button><button class="btn s d" data-a="ban" data-i="${p.id}">Remove &amp; ban</button></div>`).join('')||'<p class="mut">No users.</p>'}`;
  $('#sg').onclick=()=>aUsers($('#sq').value.trim());
  b.querySelectorAll('button[data-a]').forEach(x=>x.onclick=async()=>{const i=x.dataset.i,a=x.dataset.a,p=data.find(z=>z.id===i);let r;
   if(a==='paid')r=await upd(i,{plan:'premium',paid_until:day(p.paid_until)});
@@ -54,8 +56,9 @@ async function aUsers(q=''){const b=$('#ab');let r=sb.from('profiles').select('*
   else if(a==='unsus')r=await upd(i,{status:'active'});
   else if(a==='ver')r=await upd(i,{verified:!p.verified});
   else if(a==='edit')return modal('Edit '+p.name,JSON.stringify(p,null,2),async v=>{const{id,...rest}=v;if(ok(await upd(i,rest))){aUsers(q);return true}});
-  else if(a==='rm'){if(!confirm('Delete this user from the database? Their profile, matches and chats are removed. They can sign in again and create a new profile.'))return;r=await sb.from('profiles').delete().eq('id',i)}
-  else if(a==='ban'){if(!confirm('Remove this user and block their email from signing in again?'))return;await sb.from('blocked_users').upsert({email:p.email,reason:'removed by admin'});r=await sb.from('profiles').delete().eq('id',i)}
+  else if(a==='clr'){if(!confirm('Remove all photos from this profile?'))return;await wipe(p);r=await upd(i,{photo:null,photos:[]})}
+  else if(a==='rm'){if(!confirm('Delete this user from the database? Their profile, matches and chats are removed. They can sign in again and create a new profile.'))return;await wipe(p);r=await sb.from('profiles').delete().eq('id',i)}
+  else if(a==='ban'){if(!confirm('Remove this user and block their email from signing in again?'))return;await sb.from('blocked_users').upsert({email:p.email,reason:'removed by admin'});await wipe(p);r=await sb.from('profiles').delete().eq('id',i)}
   ok(r);aUsers(q)})}
 
 // ---- DELETED ACCOUNTS ----
@@ -65,7 +68,7 @@ async function aDeleted(){const b=$('#ab');const{data,error}=await sb.from('dele
  <button class="btn s g" data-v="${d.id}">View data</button><button class="btn s d" data-f="${d.id}">Delete forever</button></div>`).join('')||'<p class="mut">No deleted accounts.</p>'}`;
  b.querySelectorAll('[data-v]').forEach(x=>x.onclick=()=>{const d=data.find(z=>String(z.id)===x.dataset.v);modal('Deleted account: '+d.name,JSON.stringify(d,null,2),async()=>true,'Close')});
  b.querySelectorAll('[data-f]').forEach(x=>x.onclick=async()=>{const d=data.find(z=>String(z.id)===x.dataset.f);if(!confirm('Permanently delete this record? This cannot be undone.'))return;
-  const ph=d.profile&&d.profile.photo;if(ph&&ph.includes('/photos/'))await sb.storage.from('photos').remove([decodeURIComponent(ph.split('/photos/')[1].split('?')[0])]);
+  const phs=[d.profile&&d.profile.photo,...((d.profile&&d.profile.photos)||[])].filter(u=>u&&u.includes('/photos/'));if(phs.length)await sb.storage.from('photos').remove(phs.map(u=>decodeURIComponent(u.split('/photos/')[1].split('?')[0])));
   ok(await sb.from('deleted_accounts').delete().eq('id',d.id));aDeleted()})}
 
 // ---- REPORTS ----
