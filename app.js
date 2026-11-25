@@ -23,6 +23,28 @@ const av=p=>p.photo?`<img class="av" src="${esc(p.photo)}">`:`<div class="av">�
 let tt;function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',3500)}
 const day=d=>new Date(Math.max(Date.now(),d?new Date(d):0)+30*864e5).toISOString();
 
+// ---- AI (Gemini via the secure "ai-chat" Edge Function; the API key never touches the browser) ----
+async function aiCall(mode,payload){const{data,error}=await sb.functions.invoke('ai-chat',{body:{mode,...payload}});
+ if(error){let m='AI is unavailable right now';try{const j=await error.context.json();if(j&&j.error)m=j.error}catch(e){}throw new Error(m)}
+ if(!data||!data.text)throw new Error('No answer. Try again');return data.text}
+const lines=t=>t.split('\n').map(x=>x.replace(/^[\s\-*\d.)"']+|["']+$/g,'').trim()).filter(Boolean);
+const FAQ=[[/pay|premium|₹|money|refund/i,'Premium is ₹79 for 30 days and turns on automatically after payment. If it has not activated after a minute, use Contact us in the Me tab with your payment reference.'],
+ [/delete|hide|remove/i,'Open the Me tab: you can hide your profile or delete it there.'],[/report|block|unmatch|harass/i,'Open a chat, tap ⋯ and type report, block or unmatch. Admins review every report.'],
+ [/like|limit/i,'Free accounts get 20 likes a day. Premium has unlimited likes.']];
+let botMsgs=[];
+function addFab(){if($('#fab'))return;const b=document.createElement('button');b.id='fab';b.title='Help';b.textContent='🤖';b.onclick=supportBot;document.body.appendChild(b)}
+function supportBot(){if($('#bot'))return;const o=document.createElement('div');o.id='bot';
+ o.innerHTML=`<div class="wrap"><div class="row" style="cursor:default"><h2 style="flex:1;margin:0">🤖 Help assistant</h2><button class="btn s g" id="bx">Close</button></div><div class="msgs" id="bm"></div><div class="send"><input id="bi" placeholder="Ask about matches, Premium, safety..." maxlength="400"><button class="btn" id="bs">Send</button></div><p class="tiny">AI can make mistakes. For payments or account issues use <a href="#" id="bc" style="color:var(--b)">Contact us</a>.</p></div>`;
+ document.body.appendChild(o);
+ const paint=()=>{$('#bm').innerHTML=(botMsgs.length?botMsgs:[{role:'bot',text:'Hi! 👋 I can help with matching, Premium, safety and your account. What do you need?'}]).map(m=>`<div class="bub ${m.role==='user'?'me':''}" style="white-space:pre-wrap">${esc(m.text)}</div>`).join('');$('#bm').scrollTop=1e9};paint();
+ $('#bx').onclick=()=>o.remove();$('#bc').onclick=e=>{e.preventDefault();contact()};
+ let busy=false;const send=async()=>{const t=$('#bi').value.trim();if(!t||busy)return;busy=true;$('#bi').value='';botMsgs.push({role:'user',text:t});paint();
+  botMsgs.push({role:'bot',text:'…'});paint();
+  try{const a=await aiCall('support',{messages:botMsgs.slice(0,-1)});botMsgs[botMsgs.length-1].text=a}
+  catch(e){const f=FAQ.find(x=>x[0].test(t));botMsgs[botMsgs.length-1].text=f?f[1]:(e.message+'. You can also use Contact us.')}
+  busy=false;paint()};
+ $('#bs').onclick=send;$('#bi').onkeydown=e=>{if(e.key==='Enter')send()}}
+
 // ---- AI match score (runs free in the browser: interest overlap + study level + cohort + goal) ----
 function score(a,b){const A=new Set(a.interests||[]),B=b.interests||[],sh=B.filter(x=>A.has(x)),u=new Set([...A,...B]).size||1;
  let s=sh.length/u*70+10;if(a.looking===b.looking||a.looking==='Both'||b.looking==='Both')s+=10;if(a.level===b.level)s+=5;if(a.cohort===b.cohort)s+=5;return{pct:Math.min(99,Math.round(s)),sh}}
@@ -61,6 +83,7 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
  <select id="lv">${LV.map(x=>`<option ${p.level===x?'selected':''}>${x}</option>`).join('')}</select>
  <select id="lk">${LOOK.map(x=>`<option ${p.looking===x?'selected':''}>${x}</option>`).join('')}</select>
  <textarea id="bio" rows="3" placeholder="Short bio">${esc(p.bio)}</textarea>
+ <button class="btn g" type="button" id="aib">✨ Write my bio with AI</button><div id="aio"></div>
  <p class="mut">Interests (used by AI matching)</p><div class="chips" id="ch">${INTS.map(i=>`<span class="chip ${sel.has(i)?'on':''}">${i}</span>`).join('')}</div>
  <p class="mut">Profile picture</p><div class="mainph"><div id="mp"></div><button class="btn s g" type="button" id="mpb">Add / change picture</button><input id="mpf" type="file" accept="image/*,.heic,.heif" hidden></div>
  <p class="mut">More photos (up to 4)</p><div class="gal" id="gl"></div><input id="gf" type="file" accept="image/*,.heic,.heif" multiple hidden>
@@ -72,6 +95,11 @@ function form(user,p){let sel=new Set(p.interests||[]);const edit=!!p.id;
   $('#gl').innerHTML=gal.map((g,i)=>`<div class="gi"><img src="${esc(g.url)}"><b data-r="${i}">✕</b></div>`).join('')+(gal.length<4?'<div class="gi" id="ga">+</div>':'');
   document.querySelectorAll('#gl [data-r]').forEach(x=>x.onclick=()=>{const g=gal.splice(+x.dataset.r,1)[0];if(!g.file)removed.push(g.url);paint()});
   if($('#ga'))$('#ga').onclick=()=>$('#gf').click()};paint();
+ $('#aib').onclick=async()=>{const btn=$('#aib');if(!sel.size)return toast('Pick a few interests first');btn.disabled=true;btn.textContent='✨ Thinking...';
+  try{const t=await aiCall('bio',{facts:{name:$('#nm').value,level:$('#lv').value,looking:$('#lk').value,interests:[...sel],draft:$('#bio').value}});
+   $('#aio').innerHTML='<p class="tiny">Tap one to use it:</p>'+lines(t).slice(0,2).map(x=>`<div class="card" data-b style="cursor:pointer;padding:10px;margin:6px 0">${esc(x)}</div>`).join('');
+   $('#aio').querySelectorAll('[data-b]').forEach(c=>c.onclick=()=>{$('#bio').value=c.textContent;$('#aio').innerHTML=''})}
+  catch(e){toast(e.message)}btn.disabled=false;btn.textContent='✨ Write my bio with AI'};
  $('#mpb').onclick=()=>$('#mpf').click();
  $('#mpf').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const b=await shrink(f);if(!b)return toast('Could not read that image');if(main.url&&!main.file)removed.push(main.url);main={url:URL.createObjectURL(b),file:b};paint()};
  $('#gf').onchange=async e=>{for(const f of [...e.target.files].slice(0,4-gal.length)){const b=await shrink(f);if(b)gal.push({url:URL.createObjectURL(b),file:b});else toast('Could not read one image')}e.target.value='';paint()};
@@ -96,7 +124,11 @@ function shell(){app.innerHTML=`<div class="wrap" id="v"></div>
  <nav>${[['discover','🔥','Discover'],['likes','💛','Likes'],['chats','💬','Chats'],['premium','⭐','Premium'],['me','👤','Me']].map(([k,i,l])=>`<button data-t="${k}"><b>${i}</b>${l}</button>`).join('')}</nav>`;
  document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(b.dataset.t==='me'&&tab!=='me')prevTab=tab;tab=b.dataset.t;chat=null;go()});
  go()}
-function go(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));({discover,likes,chats,premium,me:()=>form({id:me.id,email:me.email},me)})[tab]()}
+function go(){addFab();document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));({discover,likes,chats,premium,me:()=>form({id:me.id,email:me.email},me)})[tab]()}
+
+// ---- EVENTS (shown at the top of the home screen) ----
+const EVENTS=`<div class="ev"><div class="evh"><b>🎉 Events</b><span class="pill">Coming soon</span></div>
+ <p>Events coming soon! Join with your partner or get paired with a random partner.</p></div>`;
 
 // ---- DISCOVER ----
 async function discover(){
@@ -105,16 +137,14 @@ async function discover(){
  const fl=`<div class="chips"><select id="fk" style="width:auto">${['All',...LOOK].map(x=>`<option ${F.looking===x?'selected':''}>${x}</option>`).join('')}</select>
  <select id="fl" style="width:auto" ${prem(me)?'':'disabled'}>${['All',...LV].map(x=>`<option ${F.level===x?'selected':''}>${x}</option>`).join('')}</select><span class="tiny">${prem(me)?'Advanced filters on':'Level filter: Premium'}</span></div>`;
  let body;
- if(showAd&&!prem(me))body=`<div class="ad">📢 Ad space<br><small>Free tier ads. Go Premium to remove.</small></div><div class="acts"><button class="btn" id="ct">Continue</button></div>`;
- else if(!p)body=`<div class="card">No more profiles right now. Try changing filters or check back soon.</div>`;
+ if(!p)body=`<div class="card">No more profiles right now. Try changing filters or check back soon.</div>`;
  else{const s=p._s;body=`<div class="pcard"><div id="pimg">${imgOf(p,pi)}</div>${dots(p,pi)}<div class="score">🤖 ${s.pct}% match</div><div class="info"><h2>${esc(p.name)}, ${p.age} ${p.verified?'✅':''}</h2><div class="mut">${esc(p.level)} · ${esc(p.cohort)} · ${esc(p.looking)}</div><p style="margin:6px 0">${esc(p.bio)}</p>
  <div class="chips">${(p.interests||[]).map(i=>`<span class="chip ${s.sh.includes(i)?'sh':''}">${esc(i)}</span>`).join('')}</div></div></div>
  <div class="acts"><button class="rb" id="x">✕</button>${prem(me)?'<button class="rb" id="u">↩</button>':''}<button class="rb" id="s">⭐</button><button class="rb" id="l">💚</button></div>`}
- v.innerHTML=fl+body;
+ v.innerHTML=EVENTS+fl+body;
  if(p&&$('#pimg'))$('#pimg').onclick=e=>{const n=plist(p).length;if(n<2)return;const r=e.currentTarget.getBoundingClientRect();pi=e.clientX-r.left<r.width/2?Math.max(0,pi-1):Math.min(n-1,pi+1);discover()};
  $('#fk').onchange=e=>{F.looking=e.target.value;deck=[];last=null;discover()};$('#fl').onchange=e=>{F.level=e.target.value;deck=[];last=null;discover()};
- if($('#ct'))$('#ct').onclick=()=>{showAd=false;discover()};
- if(p&&!showAd){$('#x').onclick=()=>swipe('pass');$('#s').onclick=()=>swipe('super');$('#l').onclick=()=>swipe('like');
+ if(p){$('#x').onclick=()=>swipe('pass');$('#s').onclick=()=>swipe('super');$('#l').onclick=()=>swipe('like');
   if($('#u'))$('#u').onclick=async()=>{if(!last)return toast('Nothing to undo');await sb.from('swipes').delete().eq('from_id',me.id).eq('to_id',last.id);deck.unshift(last);last=null;discover()}}}
 async function loadDeck(){
  const{data:sw}=await sb.from('swipes').select('to_id').eq('from_id',me.id);const seen=new Set((sw||[]).map(x=>x.to_id));seen.add(me.id);
@@ -123,13 +153,13 @@ async function loadDeck(){
 async function swipe(kind){const p=deck[0];
  const{error}=await sb.from('swipes').insert({from_id:me.id,to_id:p.id,kind});
  if(error)return toast(error.message.includes('LIMIT')?'Daily limit of 20 likes reached. Go Premium for unlimited!':error.message);
- last=p;deck.shift();pi=0;n++;if(n%5===0)showAd=true;
+ last=p;deck.shift();pi=0;n++;
  if(kind!=='pass'){const[a,b]=[me.id,p.id].sort();const{data}=await sb.from('matches').select('id').eq('a',a).eq('b',b);if(data&&data.length)toast("🎉 It's a match with "+p.name+'!')}
  discover()}
 
 // ---- LIKES (premium) ----
 async function likes(){const v=$('#v');
- if(!prem(me)){v.innerHTML=`<h2>Who liked you</h2><div class="card"><div class="lock">${[1,2,3].map(()=>`<div class="row"><div class="av">🙂</div><b>Someone special</b></div>`).join('')}</div><button class="btn" onclick="tab='premium';go()">Unlock with Premium ₹50/mo</button></div>`;return}
+ if(!prem(me)){v.innerHTML=`<h2>Who liked you</h2><div class="card"><div class="lock">${[1,2,3].map(()=>`<div class="row"><div class="av">🙂</div><b>Someone special</b></div>`).join('')}</div><button class="btn" onclick="tab='premium';go()">Unlock with Premium ₹79/mo</button></div>`;return}
  const{data}=await sb.from('swipes').select('from_id,kind').eq('to_id',me.id).in('kind',['like','super']);
  const ids=(data||[]).map(x=>x.from_id);const{data:ps}=ids.length?await sb.from('profiles').select('*').in('id',ids):{data:[]};
  v.innerHTML=`<h2>Who liked you</h2>${(ps||[]).map(p=>`<div class="row">${av(p)}<div style="flex:1"><b>${esc(p.name)}, ${p.age}</b><div class="tiny">${esc(p.level)} · ${esc(p.looking)}</div></div><button class="btn s" data-id="${p.id}">Like back</button></div>`).join('')||'<p class="mut">No likes yet.</p>'}`;
@@ -143,7 +173,12 @@ async function chats(){const v=$('#v');
  v.innerHTML=`<h2>Matches</h2>${(ms||[]).map(m=>{const o=by[m.a===me.id?m.b:m.a];return o?`<div class="row" data-m="${m.id}" data-o="${o.id}">${av(o)}<b>${esc(o.name)}</b></div>`:''}).join('')||'<p class="mut">No matches yet. Keep swiping!</p>'}`;
  v.querySelectorAll('.row').forEach(r=>r.onclick=()=>openChat(r.dataset.m,by[r.dataset.o]))}
 async function openChat(mid,o){chat={mid,o};const v=$('#v');
- v.innerHTML=`<div class="row" style="cursor:default"><button class="btn s g" id="bk">←</button>${av(o)}<b style="flex:1">${esc(o.name)}</b><button class="btn s g" id="mn">⋯</button></div><div class="msgs" id="ms"></div><div class="send"><input id="mi" placeholder="Message 😊" maxlength="1000"><button class="btn" id="sn">Send</button></div>`;
+ v.innerHTML=`<div class="row" style="cursor:default"><button class="btn s g" id="bk">←</button>${av(o)}<b style="flex:1">${esc(o.name)}</b><button class="btn s g" id="mn">⋯</button></div><div class="msgs" id="ms"></div><div class="chips" id="ice"><span class="chip" id="icb">✨ Icebreaker ideas</span></div><div class="send"><input id="mi" placeholder="Message 😊" maxlength="1000"><button class="btn" id="sn">Send</button></div>`;
+ $('#icb').onclick=async()=>{const c=$('#icb');c.textContent='✨ Thinking...';
+  try{const t=await aiCall('icebreaker',{facts:{name:o.name,bio:o.bio,shared:score(me,o).sh}});
+   $('#ice').innerHTML=lines(t).slice(0,3).map(x=>`<span class="chip" data-i>${esc(x)}</span>`).join('');
+   $('#ice').querySelectorAll('[data-i]').forEach(x=>x.onclick=()=>{$('#mi').value=x.textContent;$('#mi').focus()})}
+  catch(e){toast(e.message);c.textContent='✨ Icebreaker ideas'}};
  $('#bk').onclick=()=>{chat=null;chats()};
  $('#mn').onclick=async()=>{const c=prompt('Type: report, block or unmatch');if(!c)return;
   if(c==='report'){const r=prompt('Reason?');if(r){await sb.from('reports').insert({reporter:me.id,reported:o.id,reason:r});toast('Reported. Admins will review.')}}
@@ -159,10 +194,10 @@ let ch;function live(){if(ch)return;ch=sb.channel('live')
 
 // ---- PREMIUM ----
 async function premium(){const v=$('#v');const{data:pay}=await sb.from('payments').select('*').eq('user_id',me.id).order('created_at',{ascending:false});
- v.innerHTML=`<h2>Plans</h2><div class="card"><b>Free · ₹0</b><p class="mut">20 likes/day, basic matching, chat after match, basic filters, ads.</p></div>
- <div class="card" style="border-color:var(--b)"><b>Premium · ₹50/month</b><p class="mut">Unlimited likes, see who liked you, advanced filters, undo swipes, no ads.</p>
+ v.innerHTML=`<h2>Plans</h2><div class="card"><b>Free · ₹0</b><p class="mut">20 likes/day, basic matching, chat after match, basic filters.</p></div>
+ <div class="card" style="border-color:var(--b)"><b>Premium · ₹79/month</b><p class="mut">Unlimited likes, see who liked you, advanced filters, undo swipes.</p>
  ${prem(me)?`<p style="color:var(--ok)">✅ Active until ${new Date(me.paid_until).toLocaleDateString()}</p>`:''}
- <button class="btn" id="pn">Pay ₹50 and activate instantly</button></div>
+ <button class="btn" id="pn">Pay ₹79 and activate instantly</button></div>
  ${(pay||[]).map(p=>`<div class="row" style="cursor:default"><span>${esc(p.ref)}</span><span class="pill">${p.status}</span></div>`).join('')}`;
 $('#pn').onclick=payNow}
 
@@ -184,4 +219,4 @@ function contact(){const o=document.createElement('div');o.id='cto';o.innerHTML=
 
 // ---- START ----
 sb.auth.getSession().then(({data:{session}})=>session?boot(session.user):authView());
-sb.auth.onAuthStateChange(e=>{if(e==='SIGNED_OUT'){ch&&sb.removeChannel(ch);ch=null;authView()}});
+sb.auth.onAuthStateChange(e=>{if(e==='SIGNED_OUT'){ch&&sb.removeChannel(ch);ch=null;botMsgs=[];['#fab','#bot'].forEach(s=>$(s)&&$(s).remove());authView()}});
